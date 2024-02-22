@@ -8,30 +8,41 @@ use websocket::models::order_book::OrderBook;
 
 
 use tokio::sync::mpsc;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt; // Provides async write functions for File
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_level(true)
+        .with_timer(tracing_subscriber::fmt::time::uptime())
+        .init();
+
     let mut client = kraken_ws_client::connect_public()
         .await
         .expect("cannot connect");
 
-    // client
-    //     .send(SubscribeTickerRequest::symbol("BTC/USD"))
-    //     .await
-    //     .expect("cannot send request");
-    //
-    // while let Some(event) = client.ticker_events().next().await {
-    //     let event: &TickerEvent = &event;
-    //     let data = &event.data;
-    //     dbg!(event);
-    // }
 
     let (tx, mut rx) = mpsc::channel::<OrderBook>(32); // Create a channel with a buffer size of 32.
 
     // Spawn a task to handle printing.
     tokio::spawn(async move {
+        // Open or create a file to write. `File::create` will truncate the file if it already exists.
+        let mut file = File::create("order_book_log.txt").await.expect("Failed to create file");
+
         while let Some(order_book) = rx.recv().await {
-            order_book.best();
+            let msg = order_book.best();
+
+            // Write to stdout
+            println!("{}", &msg);
+
+            // Write to file, appending a newline character for each message
+            if let Err(e) = file.write_all(format!("{}\n", &msg).as_bytes()).await {
+                eprintln!("Failed to write to file: {}", e);
+                // Decide how to handle the write error. For example, you might want to break the loop,
+                // or you might simply log the error and continue trying to write new messages.
+            }
         }
     });
 
@@ -46,11 +57,12 @@ async fn main() {
         .expect("cannot send request");
 
     while let Some(event) = client.book_delta_events().next().await {
+
         let event: &BookEvent = &event;
         // let data = &event.data;
         print_book_event(&event);
-        let update = from_kraken(&event);
-        order_book.update(&update);
+        // let update = from_kraken(&event);
+        order_book.update_from_kraken(&event.data);
 
 
         // Clone the order book and send the clone to the logging task

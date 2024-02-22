@@ -22,3 +22,5 @@ serde = { version = "1.0.197", features = ["derive"] }
 regex = "1.10.3"
 binance_spot_connector_rust = "1.1.0"
 kraken_ws_client = { path = "./kraken-sdk-rust/kraken_ws_client" }
+tracing-subscriber = "0.3.18"
+tracing = "0.1.40"

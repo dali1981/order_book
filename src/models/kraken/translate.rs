@@ -15,8 +15,8 @@ pub fn from_kraken(book_event: &KrakenBookEvent) -> OrderBookUpdate {
         data.asks.iter().for_each(|level_data| {
             let price_level =
                 PriceLevel::new(
-                    Decimal::from_f64_retain(level_data.price).unwrap(),
-                    Decimal::from_f64_retain(level_data.qty).unwrap(),
+                    level_data.price,
+                    level_data.qty,
                     QuoteType::ASK
                 );
             updates.push(price_level);
@@ -24,8 +24,8 @@ pub fn from_kraken(book_event: &KrakenBookEvent) -> OrderBookUpdate {
         data.bids.iter().for_each(|level_data| {
             let price_level =
                 PriceLevel::new(
-                    Decimal::from_f64_retain(level_data.price).unwrap(),
-                    Decimal::from_f64_retain(level_data.qty).unwrap(),
+                    level_data.price,
+                    level_data.qty,
                     QuoteType::BID);
             updates.push(price_level);
         });
