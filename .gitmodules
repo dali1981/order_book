@@ -1,0 +1,3 @@
+[submodule "kraken-sdk-rust"]
+	path = kraken-sdk-rust
+	url = https://github.com/gmosx/kraken-sdk-rust.git

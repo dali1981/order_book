@@ -1,0 +1,24 @@
+[package]
+name = "websocket"
+version = "0.1.0"
+edition = "2021"
+
+#[[bin]]
+#name = "exchanges"
+#path = "src/main.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rust_decimal = "1.34.3"
+rust_decimal_macros = "1.34.2"
+tungstenite = { verion = "0.21.0", features = ["native-tls"] }
+url = "2.5.0"
+tokio = { version = "1.36.0", features = ["full"] }
+tokio-tungstenite = { verion = "0.21.0", features = ["native-tls"] }
+futures = "0.3"
+serde_json = "1.0.114"
+serde = { version = "1.0.197", features = ["derive"] }
+regex = "1.10.3"
+binance_spot_connector_rust = "1.1.0"
+kraken_ws_client = { path = "./kraken-sdk-rust/kraken_ws_client" }
