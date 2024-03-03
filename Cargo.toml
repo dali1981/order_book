@@ -12,7 +12,8 @@ edition = "2021"
 [dependencies]
 rust_decimal = "1.34.3"
 rust_decimal_macros = "1.34.2"
-tungstenite = { verion = "0.21.0", features = ["native-tls"] }
+num-traits = "0.2.18"
+tungstenite = { version = "0.21.0", features = ["native-tls"] }
 url = "2.5.0"
 tokio = { version = "1.36.0", features = ["full"] }
 tokio-tungstenite = { verion = "0.21.0", features = ["native-tls"] }
@@ -22,5 +23,9 @@ serde = { version = "1.0.197", features = ["derive"] }
 regex = "1.10.3"
 binance_spot_connector_rust = "1.1.0"
 kraken_ws_client = { path = "./kraken-sdk-rust/kraken_ws_client" }
-tracing-subscriber = "0.3.18"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt", "time"] }
 tracing = "0.1.40"
+tracing-appender = "0.2.3"
+uuid = { version = "1.7.0", features = ["v4"] }
+
+

@@ -2,8 +2,8 @@
 // OrderBook
 use kraken_ws_client::api::BookEvent;
 use BookEvent as KrakenBookEvent;
-use kraken_ws_client::types;
-use rust_decimal::Decimal;
+// use kraken_ws_client::types;
+// use rust_decimal::Decimal;
 use crate::models::order_book::{PriceLevel, QuoteType};
 
 use crate::models::order_book::OrderBookUpdate;

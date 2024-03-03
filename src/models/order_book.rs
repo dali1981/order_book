@@ -1,16 +1,31 @@
 use std::collections::BTreeMap;
-use kraken_ws_client::api::{BookData, LevelData};
+use std::fmt;
+use kraken_ws_client::api::{BookData};
 use rust_decimal::Decimal;
 use std::string::String;
+use crate::models::order_book::QuoteType::{ASK, BID};
 
+type Bids = BTreeMap<Price, Qty>;
+type Asks = BTreeMap<Price, Qty>;
+
+type Price = Decimal;
+type Qty = Decimal;
+
+
+#[derive(Debug)]
 pub struct OrderBook {
-    bids: BTreeMap<Decimal, Decimal>,
-    asks: BTreeMap<Decimal, Decimal>,
+    bids: Bids,
+    asks: Asks,
+    is_empty: bool
 }
 
 impl Clone for OrderBook {
     fn clone(&self) -> Self {
-        OrderBook {  bids: self.bids.clone(), asks:self.asks.clone() }
+        OrderBook {
+            bids: self.bids.clone(),
+            asks:self.asks.clone(),
+            is_empty: self.is_empty
+        }
     }
 }
 
@@ -19,31 +34,143 @@ impl OrderBook {
         OrderBook {
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
+            is_empty: true
         }
     }
 
 
-    fn update_level(side: &mut BTreeMap<Decimal, Decimal>, price: Decimal, quantity: Decimal) {
-        if quantity == Decimal::ZERO {
-            // If the quantity is zero, remove the price level from the bids
-            side.remove(&price);
-        } else {
-            // Otherwise, insert or update the price level with the new quantity
-            side.insert(price, quantity);
+    fn insert_order(&mut self, price: Price, quantity: Qty, quote_type: QuoteType) {
+        match quote_type {
+            BID => {
+                if quantity == Decimal::ZERO {
+                    // If the quantity is zero, remove the price level from the bids
+                    self.bids.remove(&price);
+                } else {
+                    // Otherwise, insert or update the price level with the new quantity
+                    self.bids.insert(price, quantity);
+                }
+            },
+            ASK => if quantity == Decimal::ZERO {
+                // If the quantity is zero, remove the price level from the bids
+                self.asks.remove(&price);
+            } else {
+                // Otherwise, insert or update the price level with the new quantity
+                self.asks.insert(price, quantity);
+            },
+        };
+    }
+
+
+    fn execute_sell_limit(&self, price: Price, qty: Qty) -> Vec<(Price, Qty)> {
+        let mut sell_order_qty = qty;
+        let mut modifications: Vec<(Price, Qty)> = Vec::new();
+
+        for (&bid_price, &bid_qty) in self.bids.iter().rev() {
+            if bid_price < price || sell_order_qty.is_zero() {
+                // If the bid price is less than the sell price, or no quantity left to sell, exit loop
+                break;
+            }
+            if bid_qty <= sell_order_qty {
+                modifications.push((bid_price, Decimal::ZERO));
+                sell_order_qty -= bid_qty; // Assuming qty is of type Decimal
+
+            } else {
+                let remaining_in_the_bid_level = bid_qty - sell_order_qty;
+                modifications.push((bid_price, remaining_in_the_bid_level));
+
+                sell_order_qty = Decimal::ZERO; // Update sell_order_qty accordingly
+                break;
+
+            }
         }
+        modifications
+    }
+
+    fn execute_buy_limit( &mut self, price: Price, qty: Qty) -> Vec<(Price, Qty)>  {
+        let mut buy_order_qty = qty;
+        let mut modifications: Vec<(Price, Qty)> = Vec::new();
+        // todo there must be a bug: if the limit is empty at some point, the remaining of the order will stay in the book
+        // todo this scenario isnt cobered
+
+        for (&ask_price, &ask_qty) in self.asks.iter() {
+            if ask_price > price || buy_order_qty.is_zero() {
+                // If the bid price is less than the sell price, or no quantity left to sell, exit loop
+                break;
+            }
+            if ask_qty <= buy_order_qty {
+                modifications.push((ask_price, Decimal::ZERO));
+                buy_order_qty -= ask_qty; // Assuming qty is of type Decimal
+
+            } else {
+                let remaining_in_the_ask_level = ask_qty - buy_order_qty;
+                modifications.push((ask_price, remaining_in_the_ask_level));
+
+                buy_order_qty = Decimal::ZERO; // Update sell_order_qty accordingly
+                break;
+
+            }
+        }
+
+        modifications
     }
 
     pub fn update_from_kraken(&mut self, update: &Vec<BookData>) {
-        update.iter().for_each(|book_data| {
-            book_data.asks.iter().for_each(|level_data| {
-                OrderBook::update_level(&mut self.asks, level_data.price, level_data.qty)
-            });
-            book_data.bids.iter().for_each(|level_data| {
-                OrderBook::update_level(&mut self.bids, level_data.price, level_data.qty)
-            });
-        });
-    }
+        if self.is_empty {
+            for book_data in update.iter() {
+                for level_data in book_data.asks.iter() {
+                    self.insert_order(level_data.price, level_data.qty, ASK)
+                }
+                for level_data in book_data.bids.iter() {
+                    self.insert_order(level_data.price, level_data.qty, BID)
+                }
+            }
+            // construct the order book from the update => straightforward update
+        } else {
+            // for each limit update, loop over the book and decide if it leads to execution
+            // if it leads to execution, proceed with the execution
+            // -> loop over the opposite side and remove liquidity
+            // if not proceed with a regular update
+            for book_data in update.iter() {
+                for level_data in book_data.asks.iter() {
+                    let price_in = level_data.price;
+                    let qty_in = level_data.qty;
+                    match self.best_bid() {
+                        Some((bid, qty)) => {
+                            if bid >= price_in {
+                                let modifications = self.execute_sell_limit(price_in, qty_in);
+                                // Apply modifications
+                                for (price, qty) in modifications {
+                                    self.insert_order(price, qty, BID);
+                                }
+                            } else {
+                                self.insert_order(price_in, qty, ASK);
+                            }
+                        },
+                        None => (),
+                    }
+                }
+                for level_data in book_data.asks.iter().rev() {
+                    let price_in = level_data.price;
+                    let qty_in = level_data.qty;
 
+                    match self.best_ask() {
+                        Some((ask, qty)) => {
+                            if ask <= price_in {
+                                let modifications = self.execute_buy_limit(price_in, qty_in);
+                                // Apply modifications
+                                for (price, qty) in modifications {
+                                    self.insert_order(price, qty, ASK);
+                                }
+                            } else {
+                                self.insert_order(price_in, qty, BID)
+                            }
+                        },
+                        None => (),
+                    }
+                }
+            }
+        }
+    }
     pub fn ensure_book_is_valid(&mut self) {
         // let best_ask = self.best_ask()?;
         // let best_bid = self.best_bid()?;
@@ -72,8 +199,8 @@ impl OrderBook {
         }
     }
 
-    pub fn update(&mut self, update: &OrderBookUpdate) {
-        update.price_levels.iter().for_each(|price_level| {
+    pub fn update(&mut self, update: &Vec<PriceLevel>) {
+        update.iter().for_each(|price_level| {
             let price = price_level.price;
             let quantity = price_level.quantity;
             // let level_key = format!("{:.10}", price);
@@ -165,30 +292,52 @@ pub trait OrderBookEvent {
     fn update(&self, order_book: OrderBook);
 }
 
+#[derive(Debug)]
 pub enum QuoteType{
     BID, ASK
 }
 
+impl fmt::Display for QuoteType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            QuoteType::BID => write!(f, "BID"),
+            QuoteType::ASK => write!(f, "ASK"),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct PriceLevel {
-    price: Decimal,
-    quantity: Decimal,
+    price: Price,
+    quantity: Qty,
     quote_type: QuoteType
 }
 
 impl PriceLevel {
-    pub fn new(price: Decimal, quantity: Decimal, quote_type: QuoteType) -> Self {
+    pub fn new(price: Price, quantity: Qty, quote_type: QuoteType) -> Self {
         PriceLevel{price, quantity, quote_type}
     }
 }
 
+#[derive(Debug)]
 pub struct OrderBookUpdate {
     price_levels: Vec<PriceLevel>
 }
 
 impl OrderBookUpdate {
     pub fn new(price_levels: Vec<PriceLevel>) -> Self {
-        OrderBookUpdate{price_levels}
+        OrderBookUpdate { price_levels }
     }
+
+    pub fn log_msg(&self) -> String {
+        let mut formatted = String::new();
+        for level in &self.price_levels{
+            let line = format!("{};{};{}\n", level.price, level.quantity, level.quote_type);
+            formatted.push_str(&line);
+        }
+        formatted
+    }
+
 }
 
 
@@ -218,7 +367,7 @@ mod tests {
             },
         ];
 
-        order_book.update(&OrderBookUpdate::new(updates));
+        // order_book.update(&OrderBookUpdate::new(updates));
 
         assert!(order_book.asks.is_empty(), "Asks should be empty after a zero-quantity update");
     }
@@ -239,7 +388,7 @@ mod tests {
             },
         ];
 
-        order_book.update(&OrderBookUpdate::new(updates));
+        // order_book.update(&OrderBookUpdate::new(updates));
 
         let first_bid = order_book.bids.iter().next_back().unwrap(); // Bids are in ascending order, so the last one is the highest
         assert_eq!(first_bid.0, &dec!(101), "The higher bid should come last in the BTreeMap");
